@@ -1,0 +1,162 @@
+---
+title: "Practical Machine Learning Project"
+author: "Oye Akinnikawe"
+date: "January 23, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Using devices such as *Jawbone Up, Nike FuelBand, and Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify *how much* of a particular activity they do, but they rarely quantify *how well* they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+# Data Processing
+
+## import packages and data
+
+```{r import data, message=FALSE, warning=FALSE, echo=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(RColorBrewer)
+
+trainUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(url(trainUrl), na.strings = c("NA", "DIV/0!", ""))
+testing <- read.csv(url(testUrl), na.strings = c("NA", "DIV/0!", ""))
+```
+
+partition training into a training set and a cross validation set
+
+
+```{r partition, echo=TRUE}
+set.seed(45213)
+inTrain <- createDataPartition(training$classe, p = 0.6, list = FALSE)
+
+myTraining <- training[inTrain,]
+myTesting <- training[-inTrain,]
+```
+
+## Data Cleaning
+
+Remove near zero variance variables
+
+```{r clean1, echo=TRUE}
+nzv <- nearZeroVar(myTraining)
+
+myTraining <- myTraining[, -nzv]
+myTesting <- myTesting[, -nzv]
+```
+
+Create a function to remove variables that are mostly NA
+
+```{r clean2, echo=TRUE}
+mostlyNA <- sapply(myTraining, function(x) mean(is.na(x))) > 0.95
+
+myTraining <- myTraining[, mostlyNA==F]
+myTesting <- myTesting[, mostlyNA==F]
+```
+
+Remove variable that won't influence prediction
+
+```{r clean3, echo=TRUE}
+myTraining <- myTraining[, -(1:5)]
+myTesting <- myTesting[, -(1:5)]
+
+clean <- colnames(myTraining[, -54]) # remove column "classe"
+testing <- testing[clean]
+```
+
+# Predictions
+
+Three types of predictions will be used: Decision Trees, Random Forest, Generalized Boosted Regression
+
+## Prediction with decision trees
+
+To save computing time, a 5-fold cross validation is used.
+
+```{r trees, echo=TRUE}
+set.seed(45213)
+control <- trainControl(method = "cv", number = 5)
+
+rpart_fit <- train(classe ~ ., data = myTraining, method = "rpart", 
+                   trControl = control)
+
+print(rpart_fit, digits = 4)
+
+fancyRpartPlot(rpart_fit$finalModel)
+```
+
+predict outcomes using the cross validation set
+
+```{r predict1, echo=TRUE}
+rpart_predict <- predict(rpart_fit, myTesting)
+```
+
+Show prediction result
+
+```{r result1, echo=TRUE}
+conf_rpart <- confusionMatrix(rpart_predict, myTesting$classe)
+conf_rpart
+
+rpart_accuracy <- conf_rpart$overall[1]
+rpart_accuracy
+```
+
+## Prediction with Random Forest
+
+```{r forest, echo=TRUE}
+set.seed(45213)
+rf_fit <- randomForest(classe ~ ., data = myTraining)
+rf_predict <- predict(rf_fit, myTesting, type = "class")
+conf_rf <- confusionMatrix(rf_predict, myTesting$classe)
+conf_rf
+
+rf_accuracy <-conf_rf$overall[1]
+rf_accuracy
+
+plot(rf_fit)
+```
+
+## Prediction with Generalized Boosted Regression (gbm)
+
+```{r gbm, warning=FALSE, message=FALSE, echo=TRUE}
+set.seed(45213)
+gbmfit <- train(classe ~ ., data = myTraining, method = "gbm", 
+                trControl = control, verbose=FALSE)
+gbmPredict <- predict(gbmfit, newdata = myTesting)
+conf_gbm <- confusionMatrix(gbmPredict, myTesting$classe)
+conf_gbm
+
+gbm_accuracy <- conf_gbm$overall[1]
+gbm_accuracy
+
+plot(gbmfit, ylim=c(0.7, 1))
+```
+
+# Predicting Results on the Test Data
+
+Random Forests gave an Accuracy in the cross validation (myTesting) dataset of 99.72%, which was more accurate than what was got from the Decision Trees or GBM. The expected out-of-sample error is 100-99.72 = 0.28%.
+
+```{r final prediction, echo=TRUE}
+finalPredict <- predict(rf_fit, testing, type = "class")
+finalPredict
+```
+
+
+
